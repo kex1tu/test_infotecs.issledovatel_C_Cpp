@@ -10,9 +10,9 @@ class DbConnectionGuard {
   DbConnectionGuard(std::unique_ptr<pqxx::connection> conn,
                     DbConnectionPool& db_pool);
   DbConnectionGuard(const DbConnectionGuard&) = delete;
-  DbConnectionGuard(DbConnectionGuard&&) noexcept;
+  DbConnectionGuard(DbConnectionGuard&& /*other*/) noexcept;
   DbConnectionGuard& operator=(const DbConnectionGuard&) = delete;
-  DbConnectionGuard& operator=(DbConnectionGuard&&) noexcept;
+  DbConnectionGuard& operator=(DbConnectionGuard&& /*other*/) noexcept;
   ~DbConnectionGuard();
 
   pqxx::connection& get();

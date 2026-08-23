@@ -1,0 +1,21 @@
+{
+   libgssapi_krb5_reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*/libgssapi_krb5*
+}
+{
+   libkrb5support_reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*/libkrb5support*
+}
+{
+   libpq_reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*/libpq.so*
+}

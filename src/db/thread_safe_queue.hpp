@@ -1,5 +1,3 @@
-// Copyright (C) 2026 Grigoriy Mikheyev. All rights reserved.
-// Distributed under MIT license or project terms.
 
 #pragma once
 

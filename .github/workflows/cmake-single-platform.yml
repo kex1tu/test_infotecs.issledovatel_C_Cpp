@@ -1,0 +1,161 @@
+name: CMake CI Pipeline
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  main-ci:
+    name: Build, Lint & Valgrind
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/kex1tu/cpp-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: journal_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check code formatting (clang-format)
+        run: |
+          find src tests \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) | xargs clang-format --dry-run --Werror
+
+      - name: Configure CMake (Release)
+        run: >
+          cmake -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build project
+        run: >
+          cmake --build build
+          --config Release
+          --parallel $(nproc)
+
+      - name: Run Clang-Tidy Linter
+        run: |
+          find src -name '*.cpp' | xargs -n 1 clang-tidy -p build --header-filter='src/'
+
+      - name: Initialize PostgreSQL database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h postgres -U postgres -d journal_db -f db/schema.sql
+          psql -h postgres -U postgres -d journal_db -f db/seed.sql
+
+      - name: Run Unit & Integration Tests (CTest)
+        env:
+          DB_CONN_STR: "host=postgres port=5432 dbname=journal_db user=postgres password=postgres"
+        run: >
+          ctest --test-dir build
+          --output-on-failure
+          -C Release
+          --parallel $(nproc)
+
+      - name: Run Valgrind Memory Checks
+        env:
+          DB_CONN_STR: "host=postgres port=5432 dbname=journal_db user=postgres password=postgres"
+        run: |
+          for test_bin in build/tests/test_*; do
+            if [ -x "$test_bin" ]; then
+              echo "==> Running Valgrind on $test_bin..."
+              valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --suppressions=valgrind.supp "$test_bin"
+            fi
+          done
+
+  sanitizers:
+    name: Sanitizers (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/kex1tu/cpp-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: journal_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan & UBSan
+            build_dir: build-asan
+            flags: "-fsanitize=address,undefined -fno-omit-frame-pointer"
+            env_vars: "ASAN_OPTIONS=check_initialization_order=1:strict_init_order=1:detect_stack_use_after_return=1"
+          - name: TSan
+            build_dir: build-tsan
+            flags: "-fsanitize=thread"
+            env_vars: "TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake with Sanitizer
+        run: >
+          cmake -B ${{ matrix.build_dir }}
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="${{ matrix.flags }}"
+
+      - name: Build with Sanitizer
+        run: >
+          cmake --build ${{ matrix.build_dir }}
+          --config Debug
+          --parallel $(nproc)
+
+      - name: Initialize PostgreSQL database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h postgres -U postgres -d journal_db -f db/schema.sql
+          psql -h postgres -U postgres -d journal_db -f db/seed.sql
+
+      - name: Run CTest with Sanitizer
+        run: |
+          export ${{ matrix.env_vars }}
+          export DB_CONN_STR="host=postgres port=5432 dbname=journal_db user=postgres password=postgres"
+          if command -v setarch >/dev/null 2>&1 && setarch $(uname -m) -R true 2>/dev/null; then
+            setarch $(uname -m) -R ctest --test-dir ${{ matrix.build_dir }} --output-on-failure -C Debug --parallel $(nproc)
+          else
+            ctest --test-dir ${{ matrix.build_dir }} --output-on-failure -C Debug --parallel $(nproc)
+          fi

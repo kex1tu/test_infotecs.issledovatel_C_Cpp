@@ -1,5 +1,6 @@
 #include "db_connection_pool.hpp"
 
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -28,22 +29,40 @@ DbConnectionGuard DbConnectionPool::get_connection() {
   if (!conn.has_value()) {
     throw std::runtime_error("Connection pool is stopped");
   }
+  if (!(*conn)->is_open()) {
+    try {
+      conn = std::make_unique<pqxx::connection>(conn_str_);
+    } catch (const std::exception& e) {
+      throw std::runtime_error("Failed to reconnect to DB");
+    }
+  }
+
   return DbConnectionGuard(std::move(*conn), *this);
 }
-void DbConnectionPool::return_connection(std::unique_ptr<pqxx::connection> conn) {
+void DbConnectionPool::return_connection(
+    std::unique_ptr<pqxx::connection> conn) {
   if (conn && conn->is_open()) {
     pool_.push(std::move(conn));
+  } else {
+    try {
+      auto new_conn = std::make_unique<pqxx::connection>(conn_str_);
+      if (new_conn->is_open()) {
+        pool_.push(std::move(new_conn));
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "Pool: failed to reconnect: " << e.what() << '\n';
+    }
   }
 }
 
 DbConnectionGuard::DbConnectionGuard(std::unique_ptr<pqxx::connection> conn,
                                      DbConnectionPool& db_pool)
-    : conn_(std::move(conn)), pool_(&db_pool) {};
+    : conn_(std::move(conn)), pool_(&db_pool) {}
 
 DbConnectionGuard& DbConnectionGuard::operator=(
     DbConnectionGuard&& other) noexcept {
   if (this != &other) {
-    if (conn_ && pool_) {
+    if (conn_ && pool_ != nullptr) {
       pool_->return_connection(std::move(conn_));
     }
     conn_ = std::move(other.conn_);
@@ -68,7 +87,7 @@ DbConnectionGuard::DbConnectionGuard(DbConnectionGuard&& other) noexcept
   other.pool_ = nullptr;
 }
 DbConnectionGuard::~DbConnectionGuard() {
-  if (conn_ && pool_) {
+  if (conn_ && pool_ != nullptr) {
     pool_->return_connection(std::move(conn_));
   }
 }
