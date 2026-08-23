@@ -1,0 +1,46 @@
+FROM catthehacker/ubuntu:act-latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    make \
+    git \
+    curl \
+    gcc \
+    g++ \
+    clang \
+    clang-format \
+    clang-tidy \
+    locales \
+    diffutils \
+    numdiff \
+    valgrind \
+    libgtest-dev \
+    ninja-build \
+    pkg-config \
+    libpqxx-dev \
+    libboost-all-dev \
+    postgresql-client \
+    jq \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN node --version && npm --version
+
+RUN if command -v locale-gen &>/dev/null; then locale-gen en_US.UTF-8; fi
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+WORKDIR /workspace
+
+RUN clang-format --version && clang-tidy --version && node --version
+
+CMD ["/bin/bash"]
