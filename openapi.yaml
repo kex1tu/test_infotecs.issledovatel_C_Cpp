@@ -1,0 +1,144 @@
+openapi: 3.1.0
+info:
+  title: Journal Web Service API
+  description: >
+    REST API веб-сервис на C++17 (Boost.Beast / Boost.Asio)
+    для выборки записей журнала событий из базы данных PostgreSQL (1 000 000 записей).
+  version: 1.0.0
+  license:
+    name: MIT License
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Локальный сервер разработки
+  - url: http://127.0.0.1:8080
+    description: Прямой IP loopback интерфейс
+
+paths:
+  /journal:
+    get:
+      summary: Получение записей журнала событий
+      description: >
+        Возвращает список до 10 записей журнала событий, у которых уровень важности
+        строго больше `level`, а временная метка строго позже `since`.
+        Результаты упорядочены по возрастанию времени.
+      operationId: getJournalRecords
+      parameters:
+        - name: since
+          in: query
+          required: true
+          description: >
+            Нижняя временная граница выборки (например, '2025-08-22 14:11:13+00' или '2025-08-22%2014:11:13%2B00').
+            Обязателен.
+          schema:
+            type: string
+            examples:
+              - "2025-08-22 14:11:13+00"
+        - name: level
+          in: query
+          required: false
+          description: Минимальный порог уровня важности (выбираются записи с `level > указанного`). По умолчанию 0.
+          schema:
+            type: integer
+            default: 0
+            examples:
+              - 2
+      responses:
+        '200':
+          description: Успешная выборка записей журнала (до 10 записей).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JournalRecord'
+              examples:
+                recordsList:
+                  summary: Пример выборки 2 записей
+                  value:
+                    - id: 774190
+                      ts: "2026-08-22 14:13:21.577441+00"
+                      level: 4
+                      message: "Log message 774190"
+                    - id: 619064
+                      ts: "2026-08-22 14:16:26.75275+00"
+                      level: 4
+                      message: "Log message 619064"
+        '400':
+          description: Некорректный запрос (отсутствует обязательный параметр `since` или `level` не является целым числом).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingParam:
+                  summary: Отсутствует параметр since
+                  value:
+                    error: "Missing required parameter: 'since'"
+                invalidLevel:
+                  summary: Некорректный уровень
+                  value:
+                    error: "Invalid parameter 'level'"
+        '404':
+          description: Ресурс не найден (запрошен неизвестный URI путь).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  summary: Неизвестный маршрут
+                  value:
+                    error: "Resource not found: /unknown"
+        '500':
+          description: Внутренняя ошибка сервера или базы данных.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    JournalRecord:
+      type: object
+      description: Структура отдельной записи журнала событий.
+      required:
+        - id
+        - ts
+        - level
+        - message
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Уникальный идентификатор записи в базе данных.
+          examples:
+            - 774190
+        ts:
+          type: string
+          description: Временная метка создания записи с таймзоной.
+          examples:
+            - "2026-08-22 14:13:21.577441+00"
+        level:
+          type: integer
+          description: Числовой уровень важности сообщения.
+          examples:
+            - 4
+        message:
+          type: string
+          description: Текст сообщения журнала событий.
+          examples:
+            - "Log message 774190"
+
+    ErrorResponse:
+      type: object
+      description: Стандартизированный JSON ответ при ошибке.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Детальное текстовое описание ошибки.
+          examples:
+            - "Missing required parameter: 'since'"
